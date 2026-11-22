@@ -1,0 +1,16 @@
+# Projeto Linux: mantém tudo com LF para os scripts bash funcionarem
+* text=auto eol=lf
+
+*.sh text eol=lf
+rapooctl text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.rules text eol=lf
+LICENSE text eol=lf
+
+# Binários (caso alguém queira commitar imagens/icones depois)
+*.png binary
+*.icns binary
+*.exe binary
+*.zip binary

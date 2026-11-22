@@ -1,0 +1,18 @@
+# Drivers oficiais (instaladores ~660MB, nao commitar no git)
+A HUB_Game_Win_*/
+A HUB_Game_MAC_*/
+*.exe
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Backups locais gerados pelo CLI
+*.rapoo.json
+backups/
+
+# Extracoes temporarias
+_extract/
