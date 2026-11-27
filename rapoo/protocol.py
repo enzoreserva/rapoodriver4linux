@@ -247,7 +247,8 @@ def parse_status_report(raw: bytes) -> dict:
     payload after it. Field meanings (payload-relative):
       0: low nibble connection (0=wireless 2.4G, 2=wired) | high nibble sensor class
       1: active DPI stage; 2-3 DPI X (LE); 4-5 DPI Y (LE)
-      6: battery validity flag (0 = level valid); 7: battery percent
+      6: battery validity flag (Telink: 0 = level valid; nRF54L Gen2 sends
+         0x01 with a plausible live level - treated as valid in the UI); 7: battery percent
       8: backlight mode; 9: key scan index; 10: polling raw code
       11: active profile; 12-13: USB PID (LE); 17: bit7 RF linked, bits0-6 RSSI
     """
@@ -264,6 +265,7 @@ def parse_status_report(raw: bytes) -> dict:
     out["dpi_stage"] = o[1]
     out["dpi_x"] = o[2] | (o[3] << 8)
     out["dpi_y"] = o[4] | (o[5] << 8)
+    out["battery_flag_raw"] = o[6]
     out["battery_valid"] = o[6] == 0
     out["battery_percent"] = o[7]
     out["backlight_mode"] = o[8]

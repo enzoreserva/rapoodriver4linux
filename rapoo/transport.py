@@ -182,7 +182,9 @@ def fcntl_ioctl(fd: int, request: int, buf: bytearray) -> int:
     # Local import: fcntl only exists on Linux; keeps the module importable
     # (and unit-testable) on any OS.
     import fcntl
-    return fcntl.ioctl(fd, request, buf, mutate=True)
+    # fcntl.ioctl takes only positional args (mutate_flag must mutate our
+    # bytearray so the kernel's feature-report reply lands in `buf`).
+    return fcntl.ioctl(fd, request, buf, True)
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -98,6 +99,25 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(st["polling_rate"], "1000Hz")
         self.assertEqual(st["usb_pid"], 0x4621)  # VT3S MAX wired PID
         self.assertEqual(st["connection"], "wireless-2.4G")  # low nibble 0 = 2.4G link
+
+    def test_status_report_parse_vt3s_gen2(self):
+        # 18-byte heartbeat captured live on a VT3S MAX via the 2.4G dongle
+        # (nRF54L Gen2): battery flag 0x01 with a live 80% level, RF linked.
+        raw = bytes.fromhex("072001200320030150000304002146000200a9")
+        self.assertEqual(len(raw), 19)
+        st = P.parse_status_report(raw)
+        self.assertEqual(st["connection"], "wireless-2.4G")
+        self.assertEqual(st["dpi_stage"], 1)
+        self.assertEqual(st["dpi_x"], 800)
+        self.assertEqual(st["dpi_y"], 800)
+        self.assertEqual(st["battery_flag_raw"], 0x01)
+        self.assertEqual(st["battery_percent"], 80)
+        self.assertEqual(st["key_scan_index"], 3)
+        self.assertEqual(st["polling_rate"], "250Hz")
+        self.assertEqual(st["profile"], 0)
+        self.assertEqual(st["usb_pid"], 0x4621)
+        self.assertTrue(st["rf_connected"])
+        self.assertEqual(st["rf_rssi"], 0x29)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +229,25 @@ def _make_mouse(layout="B") -> RapooMouse:
     return mouse
 
 
+class BeatAfterNTransport(FakeEEPROMTransport):
+    """Delivers a real VT3S MAX heartbeat only after N wait_for_report calls."""
+
+    HEARTBEAT = bytes.fromhex("072001200320030150000304002146000200a9")
+
+    def __init__(self, beat_after=3):
+        super().__init__()
+        self.beat_after = beat_after
+        self.beat_calls = 0
+
+    def wait_for_report(self, report_id, timeout_s):
+        if report_id == P.STATUS_REPORT_ID:
+            self.beat_calls += 1
+            time.sleep(0.01)  # avoid a busy spin while the deadline runs out
+            if self.beat_calls >= self.beat_after:
+                return self.HEARTBEAT
+        return None
+
+
 class MouseLogicTests(unittest.TestCase):
     def test_defaults_then_get(self):
         mouse = _make_mouse()
@@ -302,6 +341,39 @@ class MouseLogicTests(unittest.TestCase):
     def test_status_watch_once(self):
         mouse = _make_mouse()
         self.assertIsNone(mouse.read_status(timeout_s=0.2))
+
+    def test_read_status_parses_heartbeat(self):
+        mouse = _make_mouse()
+        mouse.transport = BeatAfterNTransport(beat_after=2)
+        st = mouse.read_status(timeout_s=5.0)
+        self.assertIsNotNone(st)
+        self.assertEqual(st["battery_percent"], 80)
+        self.assertEqual(st["polling_rate"], "250Hz")
+        self.assertTrue(st["rf_connected"])
+
+    def test_read_status_triggers_device_while_waiting(self):
+        # The Gen2 heartbeat nearly stops when idle; read_status must keep
+        # poking the device (harmless reads) while waiting, not give up.
+        mouse = _make_mouse()
+        fake = BeatAfterNTransport(beat_after=4)
+        mouse.transport = fake
+        st = mouse.read_status(timeout_s=5.0)
+        self.assertIsNotNone(st)
+        self.assertGreaterEqual(fake.beat_calls, 4)
+
+    def test_read_status_timeout_quiet_device(self):
+        mouse = _make_mouse()
+        mouse.transport = BeatAfterNTransport(beat_after=10_000)
+        self.assertIsNone(mouse.read_status(timeout_s=0.3))
+
+    def test_lod_mm_then_index_fallback(self):
+        mouse = _make_mouse()
+        mouse.set_lod("1.1")   # on the LV scale (0.7-1.7) -> index 5
+        self.assertEqual(mouse.transport.mem[1536 + 644], 5)
+        mouse.set_lod("3")     # 3.0 mm is NOT on the scale -> index 3
+        self.assertEqual(mouse.transport.mem[1536 + 644], 3)
+        with self.assertRaises(ValueError):
+            mouse.set_lod("99")  # neither mm nor index
 
 
 if __name__ == "__main__":

@@ -56,8 +56,10 @@ def cmd_status(args) -> int:
     try:
         st = mouse.read_status(timeout_s=args.timeout)
         if not st:
-            print("Nenhum heartbeat recebido (relatório 7). O mouse pode estar "
-                  "desligado, sem link RF ou fora de alcance.")
+            print("Nenhum relatório de status recebido (relatório 7). O mouse pode estar "
+                  "desligado, sem link RF ou fora de alcance. No Gen2 (VT3S MAX) o "
+                  "status vem em rajadas irregulares (silêncios de minutos são normais); "
+                  "aumente --timeout ou mexa o mouse e tente de novo.")
             return 2
         if args.json:
             print(json.dumps(st, ensure_ascii=False, indent=2))
@@ -156,6 +158,10 @@ def cmd_dpi(args) -> int:
     """Atalho direto para o caso de uso principal: mudar DPI."""
     mouse = _open_mouse(args)
     try:
+        if args.value is None and args.y is not None:
+            print("Erro: --y exige um valor de DPI (ex.: `rapooctl dpi 1200 --y 800`).",
+                  file=sys.stderr)
+            return 1
         p = args.profile
         if args.value is not None:
             mouse.set_dpi_stage_value(args.stage, dpi=args.value,
@@ -282,9 +288,10 @@ def cmd_doctor(args) -> int:
                 check("leitura de configurações", True,
                       f"polling {s.polling_rate}, {s.dpi_stage_count} estágios, "
                       f"DPI ativo {s.dpi_stages_x[s.dpi_stage] if s.dpi_stage < len(s.dpi_stages_x) else '?'}")
-                st = mouse.read_status(timeout_s=8)
+                st = mouse.read_status(timeout_s=40)
                 check("heartbeat (relatório 7)", st is not None,
-                      f"bateria {st.get('battery_percent')}%" if st else "sem heartbeat")
+                      f"bateria {st.get('battery_percent')}%" if st
+                      else "sem heartbeat em 40s (mouse ligado/awake?)")
             finally:
                 mouse.close()
         except Exception as exc:  # noqa: BLE001 - diagnóstico não deve quebrar
@@ -355,8 +362,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_devices)
 
     p = sub.add_parser("status", help="status ao vivo (bateria, DPI, polling, conexão)")
-    p.add_argument("--timeout", type=float, default=10.0,
-                   help="segundos aguardando o heartbeat (padrão 10)")
+    p.add_argument("--timeout", type=float, default=30.0,
+                   help="segundos aguardando o relatório de status (padrão 30; "
+                        "no Gen2 silêncios de minutos são normais)")
     p.add_argument("--json", action="store_true", help="saída em JSON")
     p.set_defaults(fn=cmd_status)
 
@@ -378,7 +386,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="quantos estágios ficam habilitados (1-7)")
     p.add_argument("--polling", help="125Hz, 250Hz, 500Hz, 1000Hz, 2000Hz, 4000Hz, 8000Hz")
     p.add_argument("--keyscan", help="1000Hz..8000Hz (varredura dos botões)")
-    p.add_argument("--lod", help="lift-off distance (mm da escala do modelo ou índice 1-11)")
+    p.add_argument("--lod", help="lift-off distance: mm da escala do modelo "
+                                 "(ex.: 1.2) ou índice 1-11 (ex.: 5)")
     p.add_argument("--motion-sync", type=lambda v: v.lower() in ("1", "true", "sim", "yes", "on"),
                    metavar="true|false", help="motion sync on/off")
     p.add_argument("--glass", type=lambda v: v.lower() in ("1", "true", "sim", "yes", "on"),
@@ -408,7 +417,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("value", nargs="?", type=int, default=None,
                    help="novo DPI (omite para apenas mostrar)")
     p.add_argument("--y", type=int, default=None,
-                   help="DPI Y independente (padrão: igual a X)")
+                   help="DPI Y independente do estágio (sem --y, Y não é alterado)")
     p.add_argument("--stage", type=int, default=0, choices=range(0, DPI_STAGES),
                    help="estágio a configurar (0-6, padrão 0)")
     p.add_argument("--active", type=int, choices=range(0, DPI_STAGES),

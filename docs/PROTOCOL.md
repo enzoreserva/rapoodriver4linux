@@ -21,7 +21,8 @@ Os dispositivos (e o dongle 2.4GHz) expõem múltiplas interfaces HID:
 - **Interface 1 (controle/custom)** — o canal de configuração:
   - **Report ID 6** — *Output Report*, 32 bytes (host → dispositivo: comandos)
   - **Report ID 8** — *Feature Report*, 32 bytes (dispositivo → host: respostas)
-  - **Report ID 7** — *Input Report*, heartbeat de status/bateria (~3 s)
+  - **Report ID 7** — *Input Report*, heartbeat de status/bateria (~3 s fixo
+    em modelos Telink; Gen2/nRF54L tem cadência irregular — ver seção 6.1)
   - Usage Page `0xFF00` (vendor-defined), Usage `0x02` (ou `0x0E`)
 - **Interface 2**: frames vendor de 512 bytes (OTA de firmware — evitar).
 
@@ -157,7 +158,7 @@ PAW3398 → 50–26000.
 | 2 | estágio DPI ativo |
 | 3–4 | DPI X (u16 LE) |
 | 5–6 | DPI Y (u16 LE) |
-| 7 | flag de validade da bateria (`0` = nível válido) |
+| 7 | flag de validade da bateria (`0` = nível válido no Telink; Gen2 envia `0x01` com nível plausível — a UI confia no % quando 0–100) |
 | 8 | bateria % (0–100) |
 | 9 | backlight |
 | 10 | índice key scan |
@@ -165,6 +166,30 @@ PAW3398 → 50–26000.
 | 12 | perfil ativo |
 | 13–14 | USB PID (u16 LE) |
 | 18 | bit7 = RF conectado, bits0–6 = RSSI |
+
+### 6.1 Medido ao vivo no Gen2 (VT3S MAX, dongle 2.4G, nRF54L)
+
+Captura real (relatório de 18 bytes no total, incluindo o report ID):
+
+```
+07 20 01 20 03 20 03 01 50 00 03 04 00 21 46 00 02 00 a9
+```
+
+- **Cadência irregular — não é um heartbeat fixo no Gen2**: observamos
+  rajadas a ~2 s (9 relatórios em 40 s) seguidas de silêncio de vários
+  minutos, mesmo com o mouse em uso e o host enviando comandos a cada 2 s.
+  Em modelos Telink a cadência é ~3 s constante. O `rapooctl status` espera
+  até 30 s (`--timeout`) enviando leituras inofensivas (offset 664, 1 byte)
+  durante a espera; se nada chegar, informa claramente que não houve
+  relatório. A bateria não fica na EEPROM global (espaço 0–1074 varrido).
+- Bytes 15–16 (`02 00`): key/wheel type e RF type (índices do parser Telink;
+  não validados oficialmente no Gen2).
+- A resposta aos comandos também chega como **Input Report 6** (32 bytes,
+  mesmo payload do feature report 8) — o descritor declara o report 6 nas
+  direções input e output. O `wait_for_report` descarta esses frames ao
+  esperar o relatório 7.
+- No Linux, o `HIDIOCGFEATURE` retorna o feature report **sem** o report ID
+  (layout A, offset de payload 4) — a calibração automática cobre isso.
 
 ## 7. Robustez implementada no rapooctl
 

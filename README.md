@@ -24,7 +24,7 @@ rapidíssimo: mude o DPI agora
 |---|---|
 | DPI (7 estágios, X/Y independentes, estágio ativo, nº de estágios) | `dpi`, `set --dpi` |
 | Polling rate (125 a 8000 Hz) | `set --polling 8000Hz` |
-| Bateria / status ao vivo | `status`, `watch` |
+| Bateria / status ao vivo | `status`, `watch` (Gen2: sem cadência fixa — rajadas a ~2s seguidas de silêncio de minutos; o `status` espera 30s e avisa se nada vier) |
 | Lift-off distance | `set --lod 1.0` |
 | Motion sync, glass tracking, ângulo do sensor | `set --motion-sync true` etc. |
 | Debounce dos cliques (0–32 ms) | `set --debounce-press 2` |
@@ -126,10 +126,10 @@ Saída JSON para scripts: `--json` em `get`/`status`.
 
 ## Quando o mouse chegar — checklist
 
-O driver foi construído **sem acesso ao hardware** (mouse ainda em trânsito
-e máquina atual é Windows), validado por 26 testes unitários contra um
-dispositivo simulado + protocolo confirmado em hardware pela comunidade.
-No primeiro contato real, faça na ordem:
+Validado **em hardware real**: VT3S MAX via dongle 2.4G (leitura e escrita
+verificada de todas as configurações, layout de resposta A com offset 4 no
+Linux, heartbeat de 18 bytes — ver `docs/PROTOCOL.md` §6.1) + 31 testes
+unitários contra um dispositivo simulado. Em uma máquina nova, faça na ordem:
 
 1. `./install.sh` (se ainda não rodou) e reconecte o dongle.
 2. `rapooctl doctor` — verifica enumeração, identificação do modelo

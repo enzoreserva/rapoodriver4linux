@@ -423,13 +423,20 @@ class RapooMouse:
                 raise ValueError(f"Índice LOD deve ser 1-{len(scale)}")
             idx = value
         else:
-            mm = float(value)
+            text = str(value).strip()
+            mm = float(text)
             matches = [i for i, v in enumerate(scale, 1) if abs(v - mm) < 1e-6]
-            if not matches:
+            if matches:
+                idx = matches[0]
+            elif text.isdigit() and 1 <= int(text) <= len(scale):
+                # CLI always passes strings; a bare integer that is not on the
+                # mm scale is accepted as a 1-based scale index (--lod 5).
+                idx = int(text)
+            else:
                 raise ValueError(
                     f"LOD {mm} mm fora da escala do modelo "
-                    f"({scale[0]:.1f}-{scale[-1]:.1f} mm)")
-            idx = matches[0]
+                    f"({scale[0]:.1f}-{scale[-1]:.1f} mm). Use um valor da "
+                    f"escala em mm ou um índice inteiro 1-{len(scale)}")
         self.write_memory(OFFSET_MOUSE_SLIGHT, [idx], profile)
 
     def set_motion_sync(self, enabled: bool, profile: int = 0) -> None:
@@ -536,35 +543,51 @@ class RapooMouse:
     # ------------------------------------------------------------------
     # live status
     # ------------------------------------------------------------------
-    def read_status(self, timeout_s: float = 10.0) -> Optional[dict]:
-        """Waits for one heartbeat input report (ID 7) and parses it.
+    def read_status(self, timeout_s: float = 30.0,
+                    trigger_every_s: float = 2.0) -> Optional[dict]:
+        """Waits for one status input report (ID 7) and parses it.
 
-        Strategy (validated by the community project): first wait passively
-        ~4s (the ~3s heartbeat usually arrives); only if nothing shows up,
-        send a harmless 1-byte read as a trigger and wait the remainder.
+        Timing measured live on Gen2 (VT3S MAX, nRF54L, 2.4G dongle): report
+        7 is NOT a fixed heartbeat - it flows in ~2s bursts (9 reports in 40s
+        observed) and then goes silent for minutes, even while the mouse
+        moves and the host sends commands. Strategy: passive select wait;
+        every trigger_every_s send a harmless 1-byte EEPROM read (free to
+        send, sometimes coincides with status resuming); return the first
+        report that arrives, or None after timeout_s.
         """
         from .protocol import parse_status_report
-        raw = self.transport.wait_for_report(STATUS_REPORT_ID,
-                                             timeout_s=min(4.0, timeout_s))
-        if raw is None and timeout_s > 4.0:
-            try:
-                self.read_memory(OFFSET_MOUSE_DPI_CUR, 1, 0)
-            except Exception:
-                pass
-            raw = self.transport.wait_for_report(STATUS_REPORT_ID,
-                                                 timeout_s=timeout_s - 4.0)
-        if raw is None:
-            return None
-        try:
-            return parse_status_report(raw)
-        except ValueError:
-            return None
+        deadline = time.time() + timeout_s
+        next_trigger = time.time() + trigger_every_s
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            raw = self.transport.wait_for_report(
+                STATUS_REPORT_ID, timeout_s=min(remaining, trigger_every_s))
+            if raw is not None:
+                try:
+                    return parse_status_report(raw)
+                except ValueError:
+                    return None
+            if time.time() >= deadline:
+                return None
+            if time.time() >= next_trigger:
+                try:
+                    self.read_memory(OFFSET_MOUSE_DPI_CUR, 1, 0)
+                except Exception:
+                    pass
+                next_trigger = time.time() + trigger_every_s
 
     def watch(self, poll_s: float = 1.0, once: bool = False) -> None:
-        """Prints live status, deduplicating unchanged heartbeats."""
+        """Prints live status, deduplicating unchanged reports.
+
+        Gen2 status arrives in irregular bursts (see read_status); each wait
+        window gives the device a fair chance to report while the loop keeps
+        printing on every change.
+        """
         last_key = None
         while True:
-            st = self.read_status(timeout_s=max(5.0, poll_s * 5))
+            st = self.read_status(timeout_s=max(8.0, poll_s * 5))
             if st:
                 key = (st.get("battery_percent"), st.get("dpi_stage"),
                        st.get("polling_raw"), st.get("profile"),
@@ -682,8 +705,11 @@ def _preset_name(value: Optional[int]) -> str:
 
 
 def _format_status(st: dict) -> str:
-    bat = (f"{st.get('battery_percent')}%" if st.get("battery_valid")
-           else f"{st.get('battery_percent')}% (?)")
+    pct = st.get("battery_percent")
+    # nRF54L Gen2 heartbeats carry flag 0x01 with a live level (Telink uses
+    # 0 = valid); trust the percent whenever it is a plausible 0-100 value.
+    bat = (f"{pct}%" if pct is not None and 0 <= pct <= 100
+           else f"{pct}% (?)")
     return (f"[{st.get('connection', '?')}] bateria {bat} | "
             f"DPI {st.get('dpi_x')}x{st.get('dpi_y')} (estágio {st.get('dpi_stage')}) | "
             f"polling {st.get('polling_rate')} | perfil {st.get('profile', '?')}"
